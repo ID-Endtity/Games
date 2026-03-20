@@ -1,0 +1,235 @@
+import tkinter as tk
+import random
+
+class Tetris:
+    # Tetromino shapes (4x4 matrices)
+    SHAPES = [
+        [[1, 1, 1, 1]],               # I
+        [[1, 1], [1, 1]],              # O
+        [[0, 1, 0], [1, 1, 1]],        # T
+        [[1, 0, 0], [1, 1, 1]],        # L
+        [[0, 0, 1], [1, 1, 1]],        # J
+        [[0, 1, 1], [1, 1, 0]],        # S
+        [[1, 1, 0], [0, 1, 1]]         # Z
+    ]
+    COLORS = ['cyan', 'yellow', 'purple', 'orange', 'blue', 'green', 'red']
+
+    def __init__(self, master):
+        self.master = master
+        master.title("Tetris (Minimal)")
+        master.resizable(False, False)
+
+        # Game constants
+        self.cell_size = 30
+        self.board_width = 10
+        self.board_height = 20
+        self.canvas_width = self.board_width * self.cell_size
+        self.canvas_height = self.board_height * self.cell_size
+
+        # Game state
+        self.board = [[0] * self.board_width for _ in range(self.board_height)]
+        self.current_piece = None   # (shape, color, x, y)
+        self.next_piece = None
+        self.score = 0
+        self.game_over = False
+        self.delay = 500  # milliseconds
+
+        # Build UI
+        self.canvas = tk.Canvas(master, width=self.canvas_width,
+                                height=self.canvas_height, bg='black')
+        self.canvas.pack(side=tk.LEFT)
+
+        # Info panel
+        self.info_frame = tk.Frame(master)
+        self.info_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=10)
+        self.score_label = tk.Label(self.info_frame, text="Score: 0", font=('Arial', 14))
+        self.score_label.pack(pady=10)
+        self.next_label = tk.Label(self.info_frame, text="Next:")
+        self.next_label.pack()
+        self.next_canvas = tk.Canvas(self.info_frame, width=4*self.cell_size,
+                                     height=4*self.cell_size, bg='black')
+        self.next_canvas.pack()
+
+        # Bind keys
+        master.bind('<Left>', self.move_left)
+        master.bind('<Right>', self.move_right)
+        master.bind('<Down>', self.move_down)
+        master.bind('<Up>', self.rotate)
+        master.bind('<space>', self.drop)
+        master.focus_set()
+
+        # Start game
+        self.new_piece()
+        self.update()
+
+    def new_piece(self):
+        """Spawn a new piece from the next queue."""
+        if self.next_piece is None:
+            # First piece
+            idx = random.randint(0, len(self.SHAPES)-1)
+            shape = self.SHAPES[idx]
+            color = self.COLORS[idx]
+        else:
+            shape, color = self.next_piece
+
+        # Choose next piece
+        idx = random.randint(0, len(self.SHAPES)-1)
+        self.next_piece = (self.SHAPES[idx], self.COLORS[idx])
+        self.draw_next()
+
+        # Place new piece at top center
+        self.current_piece = {
+            'shape': shape,
+            'color': color,
+            'x': self.board_width // 2 - len(shape[0]) // 2,
+            'y': 0
+        }
+
+        # Check immediate collision -> game over
+        if self.collision(self.current_piece['shape'],
+                          self.current_piece['x'],
+                          self.current_piece['y']):
+            self.game_over = True
+            self.canvas.create_text(self.canvas_width//2, self.canvas_height//2,
+                                    text="GAME OVER", fill='red', font=('Arial', 24))
+
+    def draw_next(self):
+        """Draw the next piece on the small canvas."""
+        self.next_canvas.delete('all')
+        if self.next_piece:
+            shape, color = self.next_piece
+            for row_idx, row in enumerate(shape):
+                for col_idx, cell in enumerate(row):
+                    if cell:
+                        x1 = col_idx * self.cell_size
+                        y1 = row_idx * self.cell_size
+                        x2 = x1 + self.cell_size
+                        y2 = y1 + self.cell_size
+                        self.next_canvas.create_rectangle(x1, y1, x2, y2,
+                                                           fill=color, outline='white')
+
+    def draw_board(self):
+        """Redraw the entire board (crude, causes flicker)."""
+        self.canvas.delete('all')
+        # Draw placed blocks
+        for y in range(self.board_height):
+            for x in range(self.board_width):
+                if self.board[y][x]:
+                    x1 = x * self.cell_size
+                    y1 = y * self.cell_size
+                    x2 = x1 + self.cell_size
+                    y2 = y1 + self.cell_size
+                    self.canvas.create_rectangle(x1, y1, x2, y2,
+                                                 fill=self.board[y][x], outline='white')
+        # Draw current piece
+        if self.current_piece and not self.game_over:
+            shape = self.current_piece['shape']
+            color = self.current_piece['color']
+            px = self.current_piece['x']
+            py = self.current_piece['y']
+            for row_idx, row in enumerate(shape):
+                for col_idx, cell in enumerate(row):
+                    if cell:
+                        x = (px + col_idx) * self.cell_size
+                        y = (py + row_idx) * self.cell_size
+                        self.canvas.create_rectangle(x, y, x+self.cell_size, y+self.cell_size,
+                                                     fill=color, outline='white')
+
+    def collision(self, shape, offset_x, offset_y):
+        """Check if shape at given position collides with board boundaries or blocks."""
+        for row_idx, row in enumerate(shape):
+            for col_idx, cell in enumerate(row):
+                if cell:
+                    board_x = offset_x + col_idx
+                    board_y = offset_y + row_idx
+                    if (board_x < 0 or board_x >= self.board_width or
+                        board_y >= self.board_height or
+                        (board_y >= 0 and self.board[board_y][board_x])):
+                        return True
+        return False
+
+    def merge_piece(self):
+        """Add current piece to board and clear lines."""
+        shape = self.current_piece['shape']
+        color = self.current_piece['color']
+        px = self.current_piece['x']
+        py = self.current_piece['y']
+        for row_idx, row in enumerate(shape):
+            for col_idx, cell in enumerate(row):
+                if cell:
+                    self.board[py+row_idx][px+col_idx] = color
+        self.clear_lines()
+        self.new_piece()
+
+    def clear_lines(self):
+        """Remove full rows and update score."""
+        rows_cleared = 0
+        y = self.board_height - 1
+        while y >= 0:
+            if all(self.board[y]):
+                # Remove row
+                del self.board[y]
+                self.board.insert(0, [0]*self.board_width)
+                rows_cleared += 1
+            else:
+                y -= 1
+        if rows_cleared:
+            self.score += rows_cleared * 100
+            self.score_label.config(text=f"Score: {self.score}")
+
+    def move_left(self, event):
+        if not self.game_over and self.current_piece:
+            new_x = self.current_piece['x'] - 1
+            if not self.collision(self.current_piece['shape'], new_x, self.current_piece['y']):
+                self.current_piece['x'] = new_x
+                self.draw_board()
+
+    def move_right(self, event):
+        if not self.game_over and self.current_piece:
+            new_x = self.current_piece['x'] + 1
+            if not self.collision(self.current_piece['shape'], new_x, self.current_piece['y']):
+                self.current_piece['x'] = new_x
+                self.draw_board()
+
+    def move_down(self, event=None):
+        if not self.game_over and self.current_piece:
+            new_y = self.current_piece['y'] + 1
+            if not self.collision(self.current_piece['shape'], self.current_piece['x'], new_y):
+                self.current_piece['y'] = new_y
+                self.draw_board()
+            else:
+                self.merge_piece()
+                self.draw_board()
+
+    def rotate(self, event):
+        if not self.game_over and self.current_piece:
+            # Rotate shape 90° clockwise
+            old_shape = self.current_piece['shape']
+            rotated = [list(row) for row in zip(*old_shape[::-1])]
+            if not self.collision(rotated, self.current_piece['x'], self.current_piece['y']):
+                self.current_piece['shape'] = rotated
+                self.draw_board()
+
+    def drop(self, event):
+        """Hard drop: move piece down until collision."""
+        if not self.game_over and self.current_piece:
+            while not self.collision(self.current_piece['shape'],
+                                     self.current_piece['x'],
+                                     self.current_piece['y']+1):
+                self.current_piece['y'] += 1
+            self.merge_piece()
+            self.draw_board()
+
+    def update(self):
+        """Main game loop: move piece down periodically."""
+        if not self.game_over:
+            self.move_down()
+            self.master.after(self.delay, self.update)
+
+def main():
+    root = tk.Tk()
+    game = Tetris(root)
+    root.mainloop()
+
+if __name__ == "__main__":
+    main() 
